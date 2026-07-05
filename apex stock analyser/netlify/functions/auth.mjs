@@ -3,7 +3,7 @@ import crypto from 'crypto';
 const SECRET = process.env.SESSION_SECRET || 'apex-dev-secret-change-me';
 const VALID_TOKENS = (process.env.VALID_TOKENS || 'demo-token').split(',').map(t => t.trim());
 const COOKIE_NAME = 'apex_session';
-const COOKIE_MAX_AGE = 7 * 24 * 60 * 60; // 7 days in seconds
+const COOKIE_MAX_AGE = 7 * 24 * 60 * 60;
 
 function sign(payload) {
   const data = Buffer.from(JSON.stringify(payload)).toString('base64url');
@@ -36,47 +36,59 @@ function parseCookies(header) {
   return cookies;
 }
 
-const H = { 'Content-Type': 'application/json' };
+export default async function handler(req) {
+  const url = new URL(req.url);
+  const path = url.pathname;
 
-export default async function handler(event) {
-  const path = event.path || event.rawUrl || '';
-  const method = event.httpMethod || 'POST';
-
-  // CORS preflight
-  if (method === 'OPTIONS') {
-    return { statusCode: 204, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type', 'Access-Control-Allow-Methods': 'POST,OPTIONS' } };
+  if (req.method === 'OPTIONS') {
+    return new Response(null, {
+      status: 204,
+      headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type', 'Access-Control-Allow-Methods': 'POST,OPTIONS' },
+    });
   }
 
-  // Logout
   if (path.endsWith('/logout')) {
-    return {
-      statusCode: 200,
-      headers: { ...H, 'Set-Cookie': `${COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0` },
-      body: JSON.stringify({ ok: true }),
-    };
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'Set-Cookie': `${COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`,
+      },
+    });
   }
 
-  // Check session
   if (path.endsWith('/check')) {
-    const cookies = parseCookies(event.headers?.cookie);
+    const cookieHeader = req.headers.get('cookie');
+    const cookies = parseCookies(cookieHeader);
     const session = verify(cookies[COOKIE_NAME]);
     if (!session) {
-      return { statusCode: 401, headers: H, body: JSON.stringify({ error: 'SESSION_EXPIRED' }) };
+      return new Response(JSON.stringify({ error: 'SESSION_EXPIRED' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      });
     }
-    return { statusCode: 200, headers: H, body: JSON.stringify({ ok: true, user: session.user }) };
+    return new Response(JSON.stringify({ ok: true, user: session.user }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
   }
 
-  // Login
   let body;
   try {
-    body = JSON.parse(event.body || '{}');
+    body = await req.json();
   } catch {
-    return { statusCode: 400, headers: H, body: JSON.stringify({ error: 'Invalid request body' }) };
+    return new Response(JSON.stringify({ error: 'Invalid request body' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
   }
 
   const { token } = body;
   if (!token) {
-    return { statusCode: 400, headers: H, body: JSON.stringify({ error: 'Token required' }) };
+    return new Response(JSON.stringify({ error: 'Token required' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
   }
 
   const tokenBuf = Buffer.from(token);
@@ -87,20 +99,22 @@ export default async function handler(event) {
   });
 
   if (!valid) {
-    return { statusCode: 401, headers: H, body: JSON.stringify({ error: 'Invalid token' }) };
+    return new Response(JSON.stringify({ error: 'Invalid token' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' },
+    });
   }
 
   const payload = { user: token.slice(0, 4) + '****', exp: Date.now() + COOKIE_MAX_AGE * 1000 };
   const cookie = sign(payload);
 
-  return {
-    statusCode: 200,
+  return new Response(JSON.stringify({ ok: true, user: payload.user }), {
+    status: 200,
     headers: {
-      ...H,
+      'Content-Type': 'application/json',
       'Set-Cookie': `${COOKIE_NAME}=${cookie}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${COOKIE_MAX_AGE}`,
     },
-    body: JSON.stringify({ ok: true, user: payload.user }),
-  };
+  });
 }
 
 export { verify, parseCookies, COOKIE_NAME };
