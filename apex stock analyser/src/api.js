@@ -33,7 +33,7 @@ export async function login(token) {
 }
 
 export async function checkSession() {
-  const r = await fetch('/.netlify/functions/auth/check', {
+  const r = await fetch('/.netlify/functions/auth?action=check', {
     method: 'POST',
     credentials: 'include',
   });
@@ -42,7 +42,7 @@ export async function checkSession() {
 }
 
 export async function logout() {
-  await fetch('/.netlify/functions/auth/logout', {
+  await fetch('/.netlify/functions/auth?action=logout', {
     method: 'POST',
     credentials: 'include',
   });
