@@ -36,59 +36,46 @@ function parseCookies(header) {
   return cookies;
 }
 
-export default async function handler(req) {
-  const url = new URL(req.url);
-  const path = url.pathname;
+export const handler = async (event) => {
+  const params = event.queryStringParameters || {};
+  const action = params.action || 'login';
+  const method = event.httpMethod || 'GET';
 
-  if (req.method === 'OPTIONS') {
-    return new Response(null, {
-      status: 204,
+  if (method === 'OPTIONS') {
+    return {
+      statusCode: 204,
       headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type', 'Access-Control-Allow-Methods': 'POST,OPTIONS' },
-    });
+    };
   }
 
-  if (path.endsWith('/logout')) {
-    return new Response(JSON.stringify({ ok: true }), {
-      status: 200,
-      headers: {
-        'Content-Type': 'application/json',
-        'Set-Cookie': `${COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`,
-      },
-    });
+  if (action === 'logout') {
+    return {
+      statusCode: 200,
+      headers: { 'Content-Type': 'application/json', 'Set-Cookie': `${COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0` },
+      body: JSON.stringify({ ok: true }),
+    };
   }
 
-  if (path.endsWith('/check')) {
-    const cookieHeader = req.headers.get('cookie');
+  if (action === 'check') {
+    const cookieHeader = event.headers?.cookie || '';
     const cookies = parseCookies(cookieHeader);
     const session = verify(cookies[COOKIE_NAME]);
     if (!session) {
-      return new Response(JSON.stringify({ error: 'SESSION_EXPIRED' }), {
-        status: 401,
-        headers: { 'Content-Type': 'application/json' },
-      });
+      return { statusCode: 401, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ error: 'SESSION_EXPIRED' }) };
     }
-    return new Response(JSON.stringify({ ok: true, user: session.user }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ok: true, user: session.user }) };
   }
 
   let body;
   try {
-    body = await req.json();
+    body = JSON.parse(event.body || '{}');
   } catch {
-    return new Response(JSON.stringify({ error: 'Invalid request body' }), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return { statusCode: 400, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ error: 'Invalid request body' }) };
   }
 
   const { token } = body;
   if (!token) {
-    return new Response(JSON.stringify({ error: 'Token required' }), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return { statusCode: 400, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ error: 'Token required' }) };
   }
 
   const tokenBuf = Buffer.from(token);
@@ -99,22 +86,17 @@ export default async function handler(req) {
   });
 
   if (!valid) {
-    return new Response(JSON.stringify({ error: 'Invalid token' }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return { statusCode: 401, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ error: 'Invalid token' }) };
   }
 
   const payload = { user: token.slice(0, 4) + '****', exp: Date.now() + COOKIE_MAX_AGE * 1000 };
   const cookie = sign(payload);
 
-  return new Response(JSON.stringify({ ok: true, user: payload.user }), {
-    status: 200,
-    headers: {
-      'Content-Type': 'application/json',
-      'Set-Cookie': `${COOKIE_NAME}=${cookie}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${COOKIE_MAX_AGE}`,
-    },
-  });
-}
+  return {
+    statusCode: 200,
+    headers: { 'Content-Type': 'application/json', 'Set-Cookie': `${COOKIE_NAME}=${cookie}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${COOKIE_MAX_AGE}` },
+    body: JSON.stringify({ ok: true, user: payload.user }),
+  };
+};
 
 export { verify, parseCookies, COOKIE_NAME };
