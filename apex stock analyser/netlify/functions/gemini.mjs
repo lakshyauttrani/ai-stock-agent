@@ -43,10 +43,20 @@ export default async function handler(event) {
   }
 
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${GEMINI_API_KEY}`;
+    // AIza... keys use ?key= param; AQ. keys use Authorization: Bearer header
+    const isBearer = GEMINI_API_KEY.startsWith('AQ.') || !GEMINI_API_KEY.startsWith('AIza');
+    const url = isBearer
+      ? `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`
+      : `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${GEMINI_API_KEY}`;
+
+    const headers = { 'Content-Type': 'application/json' };
+    if (isBearer) {
+      headers['Authorization'] = `Bearer ${GEMINI_API_KEY}`;
+    }
+
     const upstream = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(geminiBody),
     });
 
