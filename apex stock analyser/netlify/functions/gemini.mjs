@@ -1,95 +1,70 @@
 import { verify, parseCookies, COOKIE_NAME } from './auth.mjs';
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
-const MODEL = 'gemini-2.0-flash';
+const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
+const MODEL = 'llama-3.3-70b-versatile';
 
-export default async function handler(req) {
-  if (req.method === 'OPTIONS') {
-    return new Response(null, {
-      status: 204,
+export const handler = async (event) => {
+  if (event.httpMethod === 'OPTIONS') {
+    return {
+      statusCode: 204,
       headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type', 'Access-Control-Allow-Methods': 'POST,OPTIONS' },
-    });
+    };
   }
 
-  const cookieHeader = req.headers.get('cookie');
+  const cookieHeader = event.headers?.cookie || '';
   const cookies = parseCookies(cookieHeader);
   const session = verify(cookies[COOKIE_NAME]);
   if (!session) {
-    return new Response(JSON.stringify({ error: 'SESSION_EXPIRED' }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return { statusCode: 401, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ error: 'SESSION_EXPIRED' }) };
   }
 
-  if (!GEMINI_API_KEY) {
-    return new Response(JSON.stringify({ error: 'GEMINI_API_KEY not configured' }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    });
+  if (!GROQ_API_KEY) {
+    return { statusCode: 500, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ error: 'GROQ_API_KEY not configured' }) };
   }
 
   let body;
   try {
-    body = await req.json();
+    body = JSON.parse(event.body || '{}');
   } catch {
-    return new Response(JSON.stringify({ error: 'Invalid request body' }), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return { statusCode: 400, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ error: 'Invalid request body' }) };
   }
 
   const { system, userMsg, useSearch = false, maxTokens = 1500 } = body;
 
-  const geminiBody = {
-    contents: [{ role: 'user', parts: [{ text: userMsg }] }],
-    generationConfig: { maxOutputTokens: maxTokens },
+  const messages = [];
+  if (system) {
+    messages.push({ role: 'system', content: system });
+  }
+  messages.push({ role: 'user', content: userMsg });
+
+  const groqBody = {
+    model: MODEL,
+    messages,
+    max_tokens: maxTokens,
+    temperature: 0.7,
   };
 
-  if (system) {
-    geminiBody.systemInstruction = { parts: [{ text: system }] };
-  }
-
-  if (useSearch) {
-    geminiBody.tools = [{ google_search: {} }];
-  }
-
   try {
-    const isBearer = GEMINI_API_KEY.startsWith('AQ.') || !GEMINI_API_KEY.startsWith('AIza');
-    const url = isBearer
-      ? `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`
-      : `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${GEMINI_API_KEY}`;
-
-    const headers = { 'Content-Type': 'application/json' };
-    if (isBearer) {
-      headers['Authorization'] = `Bearer ${GEMINI_API_KEY}`;
-    }
-
-    const upstream = await fetch(url, {
+    const upstream = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
-      headers,
-      body: JSON.stringify(geminiBody),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${GROQ_API_KEY}`,
+      },
+      body: JSON.stringify(groqBody),
     });
 
     const data = await upstream.json();
 
     if (!upstream.ok) {
-      return new Response(JSON.stringify({ error: data.error?.message || 'Gemini API error' }), {
-        status: upstream.status,
-        headers: { 'Content-Type': 'application/json' },
-      });
+      return { statusCode: upstream.status, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ error: data.error?.message || 'Groq API error' }) };
     }
 
-    const text = data.candidates?.[0]?.content?.parts?.map(p => p.text).join('\n') || '';
+    const text = data.choices?.[0]?.message?.content || '';
     const normalized = { content: [{ type: 'text', text }] };
 
-    return new Response(JSON.stringify(normalized), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(normalized) };
   } catch (err) {
-    return new Response(JSON.stringify({ error: err.message }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return { statusCode: 500, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ error: err.message }) };
   }
-}
+};
